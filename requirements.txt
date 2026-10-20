@@ -1,0 +1,4 @@
+requests
+pandas
+pywin32
+pysqlite3
