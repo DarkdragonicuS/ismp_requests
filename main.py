@@ -3,10 +3,31 @@ import win32com.client
 import requests
 import json
 from datetime import datetime,timezone
-import pandas as pd
 import sqlite3
 from pathlib import Path
 from ismp_lib.config import *
+import flet as ft
+
+# AI generated (sorry v_v)
+# Для биндинга данных со значением поля flet
+class DataModel:
+    def __init__(self, initial_value=""):
+        self._value = initial_value
+        self._listeners = []
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, new_val):
+        self._value = new_val
+        # Уведомляем все привязанные элементы управления
+        for listener in self._listeners:
+            listener(new_val)
+
+    def bind_to(self, callback):
+        self._listeners.append(callback)
 
 def db_init():
     dbcon = sqlite3.connect(DB_NAME)
@@ -208,6 +229,7 @@ def getAuthToken(cert):
     else:
         return token
 
+# Получение полной информации о КИ
 def getCisInfo(cis,auth_token):
     url = ENDPOINT_URL + '/api/v3/true-api/cises/info'
     headers = {
@@ -222,6 +244,27 @@ def getCisInfo(cis,auth_token):
         cisInfo = json.loads(resolve.content.decode('utf-8'))
     return cisInfo
 
+# Получение списка места осуществления деятельности организации
+def getModsInfo(inn,auth_token):
+    url = ENDPOINT_URL + '/api/v3/true-api/mods/list'
+    headers = {
+        "Accept": "application/json",
+        "Authorization": "Bearer " + auth_token
+        }
+    body = {'inns':[inn]}
+    resolve = requests.get(url=url,headers=headers,params=body)
+    modsInfo = None
+    if resolve.status_code == 200:
+        modsInfo = json.loads(resolve.content.decode('utf-8'))
+    return modsInfo
+
+# Выводит информацию о марке в читаемом виде
+def requestedCisNormalizedInfo(cisItem):
+    result = {}
+    result['requestedCis'] = cisItem['requestedCis']                                                    # Запрошенный КИ
+    result['applicationDate'] = cisItem['applicationDate'] if 'applicationDate' in cisItem else None    # Дата нанесения
+    result['introducedDate'] = cisItem['introducedDate'] if 'introducedDate' in cisItem else None       # Дата ввода в оборот
+    result['gtin'] = cisItem['gtin'] if 'gtin' in cisItem else None                                     # GTIN
 
 # MAIN
 
@@ -231,15 +274,182 @@ if not db_path.is_file():
     db_init()
 
 certList = availableCertList()
-df = pd.DataFrame(certList,columns=['CN','INN','Kind','ValidFromDate','ExpireDate'])
 
-print(df)
-certIndex = int(input("Номер сертификата: "))
-cert = certList[certIndex]['CertObj']
-while True:
-    cis = input("Код маркировки: ")
-    auth_token = getAuthToken(cert)
-    cisInfo = getCisInfo(cis,auth_token)
-    if cisInfo is not None:
-        cisInfoStr = json.dumps(cisInfo,indent=4,ensure_ascii=False)
-        print(cisInfoStr)
+def main(page: ft.Page):
+    
+    selected_cert = None
+    selected_inn = DataModel('')
+
+    # Сброс флажков на других сертификатах
+    def cb_certSelector_on_change(e):
+        table_certs_rows = e.control.parent.parent.parent.rows
+        for row in table_certs_rows:
+            if e.control != row.cells[6].content:
+                row.cells[6].content.value = False
+        nonlocal selected_cert
+        selected_cert = e.control.data
+        subject_name_dict = parse_cert_parameter(selected_cert.SubjectName)
+        nonlocal selected_inn
+        selected_inn.value = extract_cert_inn(subject_name_dict)
+
+    
+    #lv_certs_controls = []
+    rowNum = 0
+
+    columns = [
+                ft.DataColumn(label=ft.Text(value='N')),
+                ft.DataColumn(label=ft.Text(value='CN')),
+                ft.DataColumn(label=ft.Text(value='ИНН')),
+                ft.DataColumn(label=ft.Text(value='Тип')),
+                ft.DataColumn(label=ft.Text(value='Начало действия')),
+                ft.DataColumn(label=ft.Text(value='Окончание действия')),
+                ft.DataColumn(label=ft.Text(value=''))
+    ]
+
+    rows = []
+
+    for cert in certList:
+
+        rowNum += 1
+        cert_obj = cert['CertObj']
+        
+        text_rowNum = ft.Text(value=str(rowNum),data=cert_obj)
+        text_cn = ft.Text(value=cert['CN'],data=cert_obj)
+        text_INN = ft.Text(value=cert['INN'],data=cert_obj)
+        text_kind = ft.Text(value=cert['Kind'],data=cert_obj)
+        text_ValidFromDate = ft.Text(value=cert['ValidFromDate'],data=cert_obj)
+        text_ExpireDate = ft.Text(value=cert['ExpireDate'],data=cert_obj)
+        cb_certSelector = ft.Checkbox(value=False,data=cert_obj,on_change=cb_certSelector_on_change)
+
+        row = ft.DataRow(
+            cells = [
+                ft.DataCell(text_rowNum),
+                ft.DataCell(text_cn,expand=True),
+                ft.DataCell(text_INN),
+                ft.DataCell(text_kind),
+                ft.DataCell(text_ValidFromDate),
+                ft.DataCell(text_ExpireDate),
+                ft.DataCell(cb_certSelector)                                
+            ]
+        )
+
+        rows.append(row)
+
+    table_certs = ft.DataTable(columns=columns,rows=rows)
+    table_container = ft.Column(height=300,controls=ft.Row(controls=table_certs,expand=True),scroll=ft.ScrollMode.ALWAYS)
+
+    field_result = ft.TextField(multiline=True,read_only=True,expand=True,max_lines=30, min_lines=10)
+
+    # Заполнение вкладки "Инфо о КИ"
+    def tab_ki_info_content():
+       
+        # Получение инфо о КИ
+        def btn_km_info_on_click(e):
+            cert = selected_cert
+            cis = field_km.value
+            auth_token = getAuthToken(cert)
+            cisInfo = getCisInfo(cis,auth_token)
+            if cisInfo is not None:
+                cisInfoStr = json.dumps(cisInfo,indent=4,ensure_ascii=False)
+            else:
+                cisInfoStr = 'Something went wrong'
+            field_result.value = cisInfoStr
+
+        field_km = ft.TextField(keyboard_type=ft.KeyboardType.TEXT,label='КИ',expand=True)
+        btn_km_info = ft.Button(content='Получить',on_click=btn_km_info_on_click)
+
+        return ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                field_km,
+                                btn_km_info
+                            ]
+                        )
+                    ]
+                )
+
+    # Заполнение вкладки "Инфо о МОД"
+    def tab_mod_info_content():
+        # Получение инфо о МОДах
+        def btn_mods_info_on_click(e):
+            cert = selected_cert
+            inn = selected_inn.value
+            auth_token = getAuthToken(cert)
+            modsInfo = getModsInfo(inn,auth_token)
+            if modsInfo is not None:
+                modsInfoStr = json.dumps(modsInfo,indent=4,ensure_ascii=False)
+            else:
+                modsInfoStr = 'Something went wrong'
+            field_result.value = modsInfoStr
+
+        field_inn = ft.TextField(keyboard_type=ft.KeyboardType.NUMBER,label='ИНН',expand=True,value=selected_inn.value)
+
+        # AI generated (sorry v_v)
+        # При изменении поля ввода обновляем прибинденное значение
+        def field_inn_on_change(e):
+            selected_inn.value = e.control.value
+        field_inn.on_change = field_inn_on_change
+        # Привязываем автоматическое обновление UI к изменению
+        def update_ui(new_val):
+            if field_inn.value != new_val:
+                field_inn.value = new_val
+            page.update()
+        selected_inn.bind_to(update_ui)
+
+        btn_mods_info = ft.Button(content='Получить',on_click=btn_mods_info_on_click)
+
+        return ft.Column(
+            controls=[
+                ft.Row(
+                    controls=[
+                        field_inn,
+                        btn_mods_info
+                    ]
+                )
+            ]
+        )
+
+    page.add(
+        ft.SafeArea(
+            content=ft.Column(
+                expand=True,
+                controls=[
+                    table_container,
+                    field_result,
+                    ft.Container(content=
+                        ft.Tabs(
+                            selected_index=0,
+                            length=2,
+                            expand=True,
+                            content=ft.Column(
+                                expand=True,
+                                controls=[
+                                    ft.TabBar(
+                                        tabs=[
+                                            ft.Tab(label="Инфо о КИ"),
+                                            ft.Tab(label="Инфо о МОД")
+                                        ]
+                                    ),
+                                    ft.TabBarView(
+                                        expand=True,
+                                        controls=[
+                                            # Инфо о КИ
+                                            tab_ki_info_content(),
+                                            # Инфо о МОДах
+                                            tab_mod_info_content()
+                                        ]
+                                    )
+                                ]    
+                            )
+                        )
+                    )
+                ]
+            )
+                        
+        )
+    )
+    page.scroll = ft.ScrollMode.AUTO
+
+if __name__ == "__main__":    
+    ft.run(main)
