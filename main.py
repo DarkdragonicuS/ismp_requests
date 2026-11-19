@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from ismp_lib.config import *
 import flet as ft
+import asyncio
+from ismp_lib.devices import DeviceBarcodeScanner,get_ki
 
 # AI generated (sorry v_v)
 # Для биндинга данных со значением поля flet
@@ -145,9 +147,9 @@ def check_available_auth_token(inn):
         if (datetime.fromisoformat(expire_date) - datetime.now(timezone.utc)).total_seconds() >= 300: # обновляем токен, если скоро истечёт
             return token
         else:
-            return None
+            return ''
     else:
-        return None
+        return ''
 
 # Сохранение токена для дальнейшего использования
 def save_token(token,inn,expire_date):
@@ -204,7 +206,7 @@ def getAuthToken(cert):
     inn = extract_cert_inn(subject_dict)
     token = check_available_auth_token(inn)
 
-    if token is None:
+    if token == '':
         url = ENDPOINT_URL + '/api/v3/true-api/auth/key'
         headers = {"Accept": "application/json"}
         resolve = requests.get(url,headers=headers)
@@ -230,7 +232,7 @@ def getAuthToken(cert):
         return token
 
 # Получение полной информации о КИ
-def getCisInfo(cis,auth_token):
+def getCisInfo(cis,auth_token,inn=''):
     url = ENDPOINT_URL + '/api/v3/true-api/cises/info'
     headers = {
         "Accept": "application/json",
@@ -284,8 +286,8 @@ def main(page: ft.Page):
     def cb_certSelector_on_change(e):
         table_certs_rows = e.control.parent.parent.parent.rows
         for row in table_certs_rows:
-            if e.control != row.cells[6].content:
-                row.cells[6].content.value = False
+            if e.control != row.cells[7].content:
+                row.cells[7].content.value = False
         nonlocal selected_cert
         selected_cert = e.control.data
         subject_name_dict = parse_cert_parameter(selected_cert.SubjectName)
@@ -303,6 +305,7 @@ def main(page: ft.Page):
                 ft.DataColumn(label=ft.Text(value='Тип')),
                 ft.DataColumn(label=ft.Text(value='Начало действия')),
                 ft.DataColumn(label=ft.Text(value='Окончание действия')),
+                ft.DataColumn(label=ft.Text(value='Токен')),
                 ft.DataColumn(label=ft.Text(value=''))
     ]
 
@@ -319,6 +322,7 @@ def main(page: ft.Page):
         text_kind = ft.Text(value=cert['Kind'],data=cert_obj)
         text_ValidFromDate = ft.Text(value=cert['ValidFromDate'],data=cert_obj)
         text_ExpireDate = ft.Text(value=cert['ExpireDate'],data=cert_obj)
+        text_auth_token = ft.TextField(check_available_auth_token(cert['INN']),read_only=True,expand=True,data=cert_obj)
         cb_certSelector = ft.Checkbox(value=False,data=cert_obj,on_change=cb_certSelector_on_change)
 
         row = ft.DataRow(
@@ -329,6 +333,7 @@ def main(page: ft.Page):
                 ft.DataCell(text_kind),
                 ft.DataCell(text_ValidFromDate),
                 ft.DataCell(text_ExpireDate),
+                ft.DataCell(text_auth_token),
                 ft.DataCell(cb_certSelector)                                
             ]
         )
@@ -344,10 +349,11 @@ def main(page: ft.Page):
     def tab_ki_info_content():
        
         # Получение инфо о КИ
-        def btn_km_info_on_click(e):
+        def btn_km_info_on_click(e: ft.ControlEvent):
             cert = selected_cert
             cis = field_km.value
             auth_token = getAuthToken(cert)
+            update_auth_token_fields()
             cisInfo = getCisInfo(cis,auth_token)
             if cisInfo is not None:
                 cisInfoStr = json.dumps(cisInfo,indent=4,ensure_ascii=False)
@@ -355,7 +361,16 @@ def main(page: ft.Page):
                 cisInfoStr = 'Something went wrong'
             field_result.value = cisInfoStr
 
+        # Получение инфо о КИ
+        async def btn_scanner_read_on_click(e: ft.ControlEvent):
+            e.control.disabled = True
+            yield
+            field_km.value = get_ki(device=scanner)
+            e.control.disabled = False
+            yield
+
         field_km = ft.TextField(keyboard_type=ft.KeyboardType.TEXT,label='КИ',expand=True)
+        btn_scanner_read = ft.Button(content='Отсканировать',on_click=btn_scanner_read_on_click)
         btn_km_info = ft.Button(content='Получить',on_click=btn_km_info_on_click)
 
         return ft.Column(
@@ -363,6 +378,7 @@ def main(page: ft.Page):
                         ft.Row(
                             controls=[
                                 field_km,
+                                btn_scanner_read,
                                 btn_km_info
                             ]
                         )
@@ -376,6 +392,7 @@ def main(page: ft.Page):
             cert = selected_cert
             inn = selected_inn.value
             auth_token = getAuthToken(cert)
+            update_auth_token_fields()
             modsInfo = getModsInfo(inn,auth_token)
             if modsInfo is not None:
                 modsInfoStr = json.dumps(modsInfo,indent=4,ensure_ascii=False)
@@ -451,5 +468,15 @@ def main(page: ft.Page):
     )
     page.scroll = ft.ScrollMode.AUTO
 
+    def update_auth_token_fields():
+        for row in table_certs.rows:
+            row.cells[6].content.value = check_available_auth_token(row.cells[2].content.value)
+
 if __name__ == "__main__":    
+    scanner = DeviceBarcodeScanner()
+    scanner.mode = BARCODE_SCANNER_MODE
+    scanner.port = BARCODE_SCANNER_PORT
+    scanner.baudrate = BARCODE_SCANNER_RATE
+    scanner.suffix = BARCODE_SCANNER_SUFFIX
+    
     ft.run(main)

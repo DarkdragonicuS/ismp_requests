@@ -1,2 +1,6 @@
 DB_NAME = 'database.db'
 ENDPOINT_URL = 'https://markirovka.crpt.ru'
+BARCODE_SCANNER_MODE = 'serial'
+BARCODE_SCANNER_PORT = 'COM3'
+BARCODE_SCANNER_RATE = 9600
+BARCODE_SCANNER_SUFFIX = b'\r'
