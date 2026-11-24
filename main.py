@@ -8,7 +8,8 @@ from pathlib import Path
 from ismp_lib.config import *
 import flet as ft
 import asyncio
-from ismp_lib.devices import DeviceBarcodeScanner,get_ki
+from ismp_lib.devices import DeviceBarcodeScanner
+import ismp_lib.devices as devices
 
 # AI generated (sorry v_v)
 # Для биндинга данных со значением поля flet
@@ -246,6 +247,21 @@ def getCisInfo(cis,auth_token,inn=''):
         cisInfo = json.loads(resolve.content.decode('utf-8'))
     return cisInfo
 
+# Получение информации о GTIN
+def getProductInfo(gtin,auth_token,inn=''):
+    url = ENDPOINT_URL + '/api/v4/true-api/product/info'
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json; charset=UTF-8",
+        "Authorization": "Bearer " + auth_token
+        }
+    body = {'gtins':[gtin]}
+    resolve = requests.post(url=url,headers=headers,json=body)
+    productInfo = None
+    if resolve.status_code == 200:
+        productInfo = json.loads(resolve.content.decode('utf-8'))
+    return productInfo
+
 # Получение списка места осуществления деятельности организации
 def getModsInfo(inn,auth_token):
     url = ENDPOINT_URL + '/api/v3/true-api/mods/list'
@@ -361,11 +377,11 @@ def main(page: ft.Page):
                 cisInfoStr = 'Something went wrong'
             field_result.value = cisInfoStr
 
-        # Получение инфо о КИ
+        # Получение инфо о КИ сканером
         async def btn_scanner_read_on_click(e: ft.ControlEvent):
             e.control.disabled = True
             yield
-            field_km.value = get_ki(device=scanner)
+            field_km.value = devices.get_ki(device=scanner)
             e.control.disabled = False
             yield
 
@@ -380,6 +396,46 @@ def main(page: ft.Page):
                                 field_km,
                                 btn_scanner_read,
                                 btn_km_info
+                            ]
+                        )
+                    ]
+                )
+
+    # Заполнение вкладки "Инфо о GTIN"
+    def tab_product_info_content():
+        
+        # Получение инфо о КИ
+        def btn_product_info_on_click(e: ft.ControlEvent):
+            cert = selected_cert
+            gtin = field_gtin.value
+            auth_token = getAuthToken(cert)
+            update_auth_token_fields()
+            productInfo = getProductInfo(gtin,auth_token)
+            if productInfo is not None:
+                productInfoStr = json.dumps(productInfo,indent=4,ensure_ascii=False)
+            else:
+                productInfoStr = 'Something went wrong'
+            field_result.value = productInfoStr
+
+        # Получение инфо о КИ сканером
+        async def btn_gtin_scanner_read_on_click(e: ft.ControlEvent):
+            e.control.disabled = True
+            yield
+            field_gtin.value = devices.get_gtin(device=scanner)
+            e.control.disabled = False
+            yield
+
+        field_gtin = ft.TextField(keyboard_type=ft.KeyboardType.TEXT,label='GTIN',expand=True)
+        btn_gtin_scanner_read = ft.Button(content='Отсканировать',on_click=btn_gtin_scanner_read_on_click)
+        btn_product_info = ft.Button(content='Получить',on_click=btn_product_info_on_click)
+
+        return ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                field_gtin,
+                                btn_gtin_scanner_read,
+                                btn_product_info
                             ]
                         )
                     ]
@@ -445,6 +501,7 @@ def main(page: ft.Page):
                                     ft.TabBar(
                                         tabs=[
                                             ft.Tab(label="Инфо о КИ"),
+                                            ft.Tab(label="Инфо о GTIN"),
                                             ft.Tab(label="Инфо о МОД")
                                         ]
                                     ),
@@ -453,6 +510,8 @@ def main(page: ft.Page):
                                         controls=[
                                             # Инфо о КИ
                                             tab_ki_info_content(),
+                                            # Инфо о GTIN
+                                            tab_product_info_content(),
                                             # Инфо о МОДах
                                             tab_mod_info_content()
                                         ]
@@ -478,5 +537,5 @@ if __name__ == "__main__":
     scanner.port = BARCODE_SCANNER_PORT
     scanner.baudrate = BARCODE_SCANNER_RATE
     scanner.suffix = BARCODE_SCANNER_SUFFIX
-    
+
     ft.run(main)

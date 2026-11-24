@@ -58,3 +58,11 @@ def get_ki(device:DeviceBarcodeScanner):
     serial = raw_data[serial_index_start:serial_index_end]
     ki = km_prefix + gtin + '21' + serial
     return ki
+
+def get_gtin(device:DeviceBarcodeScanner):
+    raw_data = get_raw_data(device)
+    if len(raw_data) == 13:
+        gtin = '0' + raw_data
+    else:
+        gtin = raw_data[2:16]
+    return gtin
