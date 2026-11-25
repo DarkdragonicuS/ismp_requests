@@ -10,6 +10,7 @@ import flet as ft
 import asyncio
 from ismp_lib.devices import DeviceBarcodeScanner
 import ismp_lib.devices as devices
+from ismp_lib.barcodes import parse_barcode_data
 
 # AI generated (sorry v_v)
 # Для биндинга данных со значением поля flet

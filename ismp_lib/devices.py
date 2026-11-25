@@ -1,4 +1,4 @@
-import serial
+import serial, ismp_lib.barcodes as barcodes
 
 class Device:    
     @property
@@ -51,18 +51,8 @@ def get_raw_data(device:DeviceBarcodeScanner):
 
 def get_ki(device:DeviceBarcodeScanner):
     raw_data = get_raw_data(device)
-    km_prefix = raw_data[0:2]
-    gtin = raw_data[2:16]
-    serial_index_start = 18
-    serial_index_end = raw_data[serial_index_start:].find("\x1d")+serial_index_start
-    serial = raw_data[serial_index_start:serial_index_end]
-    ki = km_prefix + gtin + '21' + serial
-    return ki
+    return barcodes.get_ki(raw_data)
 
 def get_gtin(device:DeviceBarcodeScanner):
     raw_data = get_raw_data(device)
-    if len(raw_data) == 13:
-        gtin = '0' + raw_data
-    else:
-        gtin = raw_data[2:16]
-    return gtin
+    return barcodes.get_gtin(raw_data)
