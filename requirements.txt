@@ -2,3 +2,4 @@ requests
 pywin32
 pysqlite3
 flet
+pyserial
